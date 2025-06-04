@@ -1,0 +1,21 @@
+{
+  "name": "fuzzy-ai",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "search": "bun run fuzzy-search-cli.ts",
+    "parse": "bun run parse-project.ts",
+    "start": "bun run fuzzy-search-cli.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "fuse.js": "^7.1.0",
+    "ts-morph": "^26.0.0"
+  }
+}
