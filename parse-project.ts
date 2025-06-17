@@ -2,17 +2,36 @@ import { Project } from "ts-morph";
 import path from "path";
 import Fuse from "fuse.js";
 import type { IFuseOptions } from "fuse.js";
+import { OpenAI } from 'openai';
+
+const elementTypes = ['class', 'interface', 'function', 'method', 'file'] as const;
+type ElementType = typeof elementTypes[number];
 
 // Types pour la structure de données indexée
-interface CodeElement {
+export interface CodeElement {
   id: string;
-  type: 'class' | 'interface' | 'function' | 'method';
+  type: ElementType;
   name: string;
   parentName?: string;
+  parentType?: ElementType;
   filePath: string;
+  lineNumber: number;
   description: string;
   searchableText: string;
+  context: {
+    fileContent: string;
+  };
 }
+
+export interface SearchResult extends CodeElement {
+  score: number;
+}
+
+const openai = new OpenAI({
+  apiKey: process.env.CHATGPTKEY,
+});
+
+const AI_CACHE = new Map<string, SearchResult[]>();
 
 // Configuration Fuse.js très permissive pour un mode "très large"
 const fuseOptions: IFuseOptions<CodeElement> = {
@@ -54,18 +73,38 @@ const project = new Project({
 const codeElements: CodeElement[] = [];
 let elementCounter = 0;
 
+// Fonction utilitaire pour obtenir le numéro de ligne
+function getLineNumber(node: any): number {
+  return node.getStartLineNumber();
+}
+
 for (const file of project.getSourceFiles()) {
   const filePath = file.getFilePath();
   const classes = file.getClasses();
   const functions = file.getFunctions();
   const interfaces = file.getInterfaces();
+  const fileContent = file.getFullText();
+  const context = {
+    fileContent,
+  }
+
+  codeElements.push({
+    id: `file-${elementCounter++}`,
+    type: 'file',
+    name: path.basename(filePath),
+    filePath,
+    lineNumber: 0,
+    description: `File ${path.basename(filePath)}`,
+    searchableText: `file ${path.basename(filePath)} ${filePath}`,
+    context
+  });
 
   if (classes.length || functions.length || interfaces.length) {
-    console.log(`\n📄 ${filePath}`);
+  
 
     for (const cls of classes) {
       const className = cls.getName() || `AnonymousClass${elementCounter++}`;
-      console.log(`  🧱 class ${className}`);
+    
 
       // Ajouter la classe à l'index
       codeElements.push({
@@ -73,13 +112,15 @@ for (const file of project.getSourceFiles()) {
         type: 'class',
         name: className,
         filePath,
+        lineNumber: getLineNumber(cls),
         description: `Class ${className} in ${path.basename(filePath)}`,
-        searchableText: `class ${className} ${path.basename(filePath)} ${filePath}`
+        searchableText: `class ${className} ${path.basename(filePath)} ${filePath}`,
+        context
       });
 
       for (const method of cls.getMethods()) {
         const methodName = method.getName();
-        console.log(`    🔹 method ${methodName}`);
+      
 
         // Ajouter la méthode à l'index
         codeElements.push({
@@ -87,16 +128,19 @@ for (const file of project.getSourceFiles()) {
           type: 'method',
           name: methodName,
           parentName: className,
+          parentType: 'class',
           filePath,
+          lineNumber: getLineNumber(method),
           description: `Method ${methodName} in class ${className}`,
-          searchableText: `method ${methodName} ${className} class ${path.basename(filePath)} ${filePath}`
+          searchableText: `method ${methodName} ${className} class ${path.basename(filePath)} ${filePath}`,
+          context
         });
       }
     }
 
     for (const intf of interfaces) {
       const interfaceName = intf.getName();
-      console.log(`  📐 interface ${interfaceName}`);
+    
 
       // Ajouter l'interface à l'index
       codeElements.push({
@@ -104,13 +148,17 @@ for (const file of project.getSourceFiles()) {
         type: 'interface',
         name: interfaceName,
         filePath,
+        lineNumber: getLineNumber(intf),
+        parentName: filePath.split('/').pop() || '',
+        parentType: 'file',
         description: `Interface ${interfaceName} in ${path.basename(filePath)}`,
-        searchableText: `interface ${interfaceName} ${path.basename(filePath)} ${filePath}`
+        searchableText: `interface ${interfaceName} ${path.basename(filePath)} ${filePath}`,
+        context
       });
 
       for (const method of intf.getMethods()) {
         const methodName = method.getName();
-        console.log(`    🔸 method ${methodName}`);
+      
 
         // Ajouter la méthode d'interface à l'index
         codeElements.push({
@@ -118,25 +166,31 @@ for (const file of project.getSourceFiles()) {
           type: 'method',
           name: methodName,
           parentName: interfaceName,
+          parentType: 'interface',
           filePath,
+          lineNumber: getLineNumber(method),
           description: `Method ${methodName} in interface ${interfaceName}`,
-          searchableText: `method ${methodName} ${interfaceName} interface ${path.basename(filePath)} ${filePath}`
+          searchableText: `method ${methodName} ${interfaceName} interface ${path.basename(filePath)} ${filePath}`,
+          context
         });
       }
     }
 
     for (const fn of functions) {
       const functionName = fn.getName() || `AnonymousFunction${elementCounter++}`;
-      console.log(`  ⚙️ function ${functionName}`);
-
+    
       // Ajouter la fonction à l'index
       codeElements.push({
         id: `function-${elementCounter++}`,
         type: 'function',
         name: functionName,
         filePath,
+        parentName: filePath.split('/').pop() || '',
+        parentType: 'file',
+        lineNumber: getLineNumber(fn),
         description: `Function ${functionName} in ${path.basename(filePath)}`,
-        searchableText: `function ${functionName} ${path.basename(filePath)} ${filePath}`
+        searchableText: `function ${functionName} ${path.basename(filePath)} ${filePath}`,
+        context
       });
     }
   }
@@ -145,76 +199,88 @@ for (const file of project.getSourceFiles()) {
 // Initialiser Fuse avec les données collectées
 const fuse = new Fuse(codeElements, fuseOptions);
 
-console.log(`\n🔍 Index créé avec ${codeElements.length} éléments`);
-console.log(`📋 Configuration fuzzy search (très permissive): threshold=${fuseOptions.threshold}`);
 
 // Fonction de recherche fuzzy
-function fuzzySearch(query: string, maxResults: number = 20): CodeElement[] {
+function fuzzySearch(query: string, maxResults: number = 20): SearchResult[] {
   if (!query.trim()) {
-    return codeElements.slice(0, maxResults);
+    return codeElements.slice(0, maxResults).map(element => ({ ...element, score: 1 }));
   }
 
   const results = fuse.search(query, { limit: maxResults });
-  console.log(`\n🔎 Recherche "${query}" - ${results.length} résultats trouvés`);
+
 
   return results.map(result => {
     const element = result.item;
-    const score = result.score || 0;
-    console.log(`  ${getIcon(element.type)} ${element.name} (score: ${score.toFixed(3)}) - ${element.description}`);
-    return element;
+  
+    return { ...element, score: result.score || 0 };
   });
 }
 
-// Fonction utilitaire pour les icônes
-function getIcon(type: string): string {
-  switch (type) {
-    case 'class': return '🧱';
-    case 'interface': return '📐';
-    case 'function': return '⚙️';
-    case 'method': return '🔹';
-    default: return '📄';
+async function fuzzySearchAI(query: string, maxResults: number = 10): Promise<SearchResult[]> {
+  const cacheKey = `${query}-${maxResults}`;
+  if (AI_CACHE.has(cacheKey)) {
+    return AI_CACHE.get(cacheKey) || [];
   }
-}
 
-// Fonction pour exporter les résultats au format optimisé pour l'IA
-function exportForAI(elements: CodeElement[]): string {
-  const grouped = elements.reduce((acc, element) => {
-    const key = element.filePath;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(element);
-    return acc;
-  }, {} as Record<string, CodeElement[]>);
+  const results = await fuzzySearch(query, 30);
 
-  let output = "# Code Structure Analysis\n\n";
+  const aiContext = exportForAI(results);
 
-  for (const [filePath, fileElements] of Object.entries(grouped)) {
-    output += `## ${path.basename(filePath)}\n`;
-    output += `*Path: ${filePath}*\n\n`;
-
-    for (const element of fileElements) {
-      const prefix = element.parentName ? `${element.parentName}.` : '';
-      output += `- **${element.type}**: ${prefix}${element.name}\n`;
+  const jsonSchema = {
+    name: "code_elements",
+    schema: {
+      type: "object",
+      properties: {
+        code_elements: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              name: { type: "string" },
+            }
+          }
     }
-    output += '\n';
-  }
+  }}};
 
-  return output;
+  const response = await openai.chat.completions.create({
+    model: "gpt-4.1-nano",
+    messages: [
+      { role: "system", content: `You are a helpful assistant that ranks code elements based on a query. You will be given a list of code elements and a query. You will need to rank the code elements based on the query. You will need to return the top ${maxResults} code elements in a JSON format.` }, 
+      { role: "user", content: `Query: ${query}` }, 
+      { role: "user", content: `Context: ${aiContext}` },
+      { role: "user", content: `Return the top ${maxResults} code elements in a JSON format.` }
+    ],
+    temperature: 0.1,
+    response_format: {
+      type: 'json_schema' ,
+      json_schema: jsonSchema,
+    },
+
+  });
+  const json = JSON.parse(response.choices[0]?.message.content || "{}") as { code_elements: { id: string }[] };
+
+  const finalResults = json.code_elements.map((element: { id: string }) => results.find(result => result.id === element.id) as SearchResult);
+  AI_CACHE.set(cacheKey, finalResults);
+  return finalResults;
 }
 
-// Exemple d'utilisation
-console.log('\n' + '='.repeat(50));
-console.log('🤖 EXEMPLE DE RECHERCHE FUZZY');
-console.log('='.repeat(50));
 
-// Test avec quelques termes de recherche
-const searchTerms = ['create amendment'];
-for (const term of searchTerms) {
-  const results = fuzzySearch(term, 5);
-  if (results.length > 0) {
-    console.log(`\n📊 Export pour IA (${term}):`);
-    console.log(exportForAI(results));
-  }
+// Fonction pour exporter les résultats au format optimisé pour demander a une IA de ranker les meilleurs resultats
+function exportForAI(elements: CodeElement[]): string {
+  return JSON.stringify(elements.map(element => ({
+    id: element.id,
+    name: element.name,
+    type: element.type,
+    parentName: element.parentName,
+    parentType: element.parentType,
+    filePath: element.filePath,
+    lineNumber: element.lineNumber,
+    // 5 lines before and 5 lines after the line number
+    context: element.context.fileContent.split("\n").slice(element.lineNumber - 6, element.lineNumber + 6).join("\n"),
+  })));
 }
+
 
 // Exporter l'objet fuse et les fonctions pour utilisation externe
-export { fuse, fuzzySearch, exportForAI, codeElements };
+export { fuse, fuzzySearch, exportForAI, codeElements, fuzzySearchAI};
