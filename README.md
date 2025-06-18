@@ -10,132 +10,45 @@ bun install
 
 ## 📋 Fonctionnalités
 
-- **Indexation complète** : Parse tous les fichiers TypeScript et extrait classes, interfaces, fonctions et méthodes
-- **Recherche fuzzy très permissive** : Configuration optimisée pour trouver des résultats même avec des termes approximatifs
-- **Export pour IA** : Formate les résultats dans un format optimisé pour les modèles d'IA
-- **Interface CLI interactive** : Outil en ligne de commande facile à utiliser
-- **Statistiques détaillées** : Analyse complète de votre codebase
+- 🔍 **Recherche floue** : Configuration très permissive pour capturer le maximum de résultats
+- 🤖 **Recherche IA** : Utilise OpenAI pour des recherches sémantiques avancées
+- 📊 **Interface CLI** : Recherche interactive en ligne de commande
+- 🎯 **Interface Live** : Interface temps réel avec sélection et ouverture dans Cursor
+- 📤 **Export IA** : Formate les résultats pour alimenter une IA
+- 🏗️ **Index complet** : Classes, interfaces, fonctions, méthodes et fichiers
 
-## 🎯 Utilisation
+## 🛠️ Usage
 
-### Interface CLI Interactive
+### Interface Live (recommandée)
 
 ```bash
-# Démarrer l'interface interactive
-bun run search
-# ou
 bun start
 ```
 
-### Commandes disponibles
+- Recherche en temps réel avec `Tab` pour basculer entre mode normal/IA
+- Sélection et ouverture directe dans Cursor
+- Navigation avec les flèches
 
-| Commande | Description | Exemple |
-|----------|-------------|---------|
-| `search <terme>` | Recherche fuzzy | `search user` |
-| `s <terme>` | Raccourci pour search | `s auth` |
-| `export` | Exporter tous les derniers résultats | `export` |
-| `export <N>` | Exporter les N premiers résultats | `export 5` |
-| `stats` | Afficher les statistiques | `stats` |
-| `config` | Afficher la configuration | `config` |
-| `help` | Afficher l'aide | `help` |
-| `quit` | Quitter | `quit` |
-
-### Parse direct
+### Parser seul
 
 ```bash
-# Analyser le projet et afficher tous les résultats
 bun run parse
 ```
 
 ## ⚙️ Configuration
 
-### Recherche très permissive
+Le projet parse automatiquement les dossiers définis dans `parse-project.ts` :
 
-- **Threshold**: 0.8 (très permissif, 0.0 = exact, 1.0 = tout accepter)
-- **Distance max**: 1000 caractères
-- **Longueur min**: 1 caractère
-- **Champs recherchés** (par poids):
-  - `name` (0.4) - Nom de l'élément
-  - `searchableText` (0.3) - Texte de recherche enrichi
-  - `description` (0.2) - Description de l'élément
-  - `parentName` (0.1) - Nom du parent (classe/interface)
+- Classes et méthodes
+- Interfaces et leurs méthodes
+- Fonctions exportées
+- Fichiers du projet
 
-### Chemin du projet cible
+Pour la recherche IA, définir `CHATGPTKEY` dans les variables d'environnement.
 
-Le projet à analyser est configuré dans `parse-project.ts` :
+## TODO
 
-```typescript
-const targetPath = path.resolve("../product/apps/api");
-```
-
-## 📊 Types d'éléments indexés
-
-- 🧱 **Classes** - Toutes les classes TypeScript
-- 📐 **Interfaces** - Toutes les interfaces TypeScript  
-- ⚙️ **Fonctions** - Fonctions standalone
-- 🔹 **Méthodes** - Méthodes de classes et interfaces
-
-## 💡 Exemples d'utilisation
-
-### Recherche simple
-```
-🔎 > search user
-```
-
-### Export pour IA
-```
-🔎 > search authentication
-🔎 > export 10
-```
-
-### Recherche directe (sans commande)
-```
-🔎 > UserService
-```
-
-## 🧠 Optimisé pour l'IA
-
-Les exports sont formatés pour être facilement compréhensibles par les modèles d'IA :
-
-```markdown
-# Code Structure Analysis
-
-## user.service.ts
-*Path: /path/to/user.service.ts*
-
-- **class**: UserService
-- **method**: UserService.authenticate
-- **method**: UserService.validateToken
-```
-
-## 🔧 Développement
-
-### Structure des fichiers
-
-- `parse-project.ts` - Script principal d'analyse et indexation
-- `fuzzy-search-cli.ts` - Interface CLI interactive
-- `package.json` - Configuration et scripts
-
-### Personnalisation
-
-Pour modifier la configuration de recherche, éditez les options dans `parse-project.ts` :
-
-```typescript
-const fuseOptions: IFuseOptions<CodeElement> = {
-  threshold: 0.8, // Modifier ici pour plus/moins de permissivité
-  // ... autres options
-};
-```
-
-## 📈 Statistiques
-
-L'outil fournit des statistiques détaillées :
-- Nombre total d'éléments indexés
-- Répartition par type (classe, interface, fonction, méthode)
-- Répartition par extension de fichier
-- Analyse de la structure du projet
-
----
-
-*Développé avec ❤️ pour optimiser les interactions avec l'IA*
-# fuzzy-semantic-search
+- Add cursor in input
+- Support pasting
+- Split server and UI
+- Support args in search (search class, fonctions etc)
